@@ -5,7 +5,15 @@ import telebot
 from telebot import types
 
 load_dotenv()
+# ================== FLASK FAKE SERVER (để Render không kill) ==================
+app = Flask(__name__)
 
+@app.route('/')
+def home():
+    return "Bot Chuyên Gia Crypto đang chạy 24/7 🔥"
+
+def run_flask():
+    app.run(host='0.0.0.0', port=10000)   # Render yêu cầu port 10000
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 BINANCE_SQUARE_KEY = os.getenv("BINANCE_SQUARE_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
