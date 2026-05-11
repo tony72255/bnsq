@@ -1,29 +1,32 @@
 import os
 import requests
+import threading
 from dotenv import load_dotenv
 import telebot
 from telebot import types
+from flask import Flask   # ← Import Flask
 
 load_dotenv()
-# ================== FLASK FAKE SERVER (để Render không kill) ==================
+
+# ================== FLASK FAKE SERVER (cho Render) ==================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot Chuyên Gia Crypto đang chạy 24/7 🔥"
+    return "Chuyên Gia Crypto Bot đang chạy 24/7 📊"
 
 def run_flask():
-    app.run(host='0.0.0.0', port=10000)   # Render yêu cầu port 10000
+    app.run(host='0.0.0.0', port=10000)
+
+# ================== CÁC BIẾN MÔI TRƯỜNG ==================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 BINANCE_SQUARE_KEY = os.getenv("BINANCE_SQUARE_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
-
-# Lưu nội dung tạm thời (fix lỗi trước đó)
 pending_contents = {}
 
-# ================== GEMINI - CHUYÊN GIA CRYPTO NGHIÊM TÚC ==================
+# ================== GEMINI - CHUYÊN GIA CRYPTO ==================
 def generate_villain_content(prompt):
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={GEMINI_API_KEY}"
@@ -31,11 +34,11 @@ def generate_villain_content(prompt):
         data = {
             "contents": [{
                 "parts": [{
-                    "text": f"""Bạn là Chuyên Gia Phân Tích Crypto nghiêm túc và chuyên nghiệp. 
-Viết bài SIÊU NGẮN (45-55 từ), đi thẳng vào vấn đề, phân tích rõ ràng. 
+                    "text": f"""Bạn là Chuyên Gia Phân Tích Crypto nghiêm túc. 
+Viết bài SIÊU NGẮN (45-55 từ), phân tích rõ ràng. 
 Kết thúc bằng lời khuyên cụ thể: NÊN MUA / NÊN BÁN / NÊN HOLD. 
-Khi nhắc coin thì tự động thêm $TICKER, tối đa chỉ 2-3 tag. 
-Giọng điệu nghiêm túc, không hài hước, không lầy lội, ít emoji.
+Khi nhắc coin thì tự động thêm $TICKER, tối đa 2-3 tag. 
+Giọng điệu chuyên nghiệp, ít emoji.
 Ý tưởng: {prompt}"""
                 }]
             }],
@@ -74,10 +77,10 @@ def post_to_binance_square(content):
     except Exception as e:
         return f"❌ Lỗi Square: {str(e)}"
 
-# ================== XỬ LÝ ==================
+# ================== XỬ LÝ BOT ==================
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.reply_to(message, "📊 **Chuyên Gia Crypto Bot 4.0** đã online!\nGửi ý tưởng coin, tao sẽ phân tích nghiêm túc + đưa lời khuyên MUA/BÁN/HOLD.")
+    bot.reply_to(message, "📊 **Chuyên Gia Crypto Bot 4.0** đang chạy 24/7!\nGửi ý tưởng coin để tao phân tích.")
 
 @bot.message_handler(commands=['post'])
 def post_cmd(message):
@@ -108,7 +111,6 @@ def process_idea(message, prompt):
         reply_markup=markup,
         parse_mode='Markdown'
     )
-    
     pending_contents[sent_msg.message_id] = content
 
 @bot.callback_query_handler(func=lambda call: True)
@@ -117,17 +119,14 @@ def callback_handler(call):
         content = pending_contents.get(call.message.message_id)
         if content:
             result = post_to_binance_square(content)
-            bot.edit_message_text(
-                f"**ĐÃ ĐĂNG THÀNH CÔNG!** 📊\n\n{content}\n\n{result}",
-                call.message.chat.id,
-                call.message.message_id
-            )
+            bot.edit_message_text(f"**ĐÃ ĐĂNG THÀNH CÔNG!** 📊\n\n{content}\n\n{result}", call.message.chat.id, call.message.message_id)
             pending_contents.pop(call.message.message_id, None)
-        else:
-            bot.answer_callback_query(call.id, "Lỗi: Không tìm thấy nội dung!")
     elif call.data == "post_no":
-        bot.edit_message_text("❌ Đã hủy phân tích.", call.message.chat.id, call.message.message_id)
+        bot.edit_message_text("❌ Đã hủy.", call.message.chat.id, call.message.message_id)
         pending_contents.pop(call.message.message_id, None)
 
-print("📊 Chuyên Gia Crypto Bot 4.0 (nghiêm túc + lời khuyên mua/bán) đang chạy...")
-bot.infinity_polling()
+# ================== CHẠY CẢ BOT + FAKE SERVER ==================
+if __name__ == "__main__":
+    print("🚀 Bot + Fake Server đang chạy trên Render...")
+    threading.Thread(target=run_flask, daemon=True).start()
+    bot.infinity_polling()
