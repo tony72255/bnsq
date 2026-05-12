@@ -6,6 +6,13 @@ import telebot
 from telebot import types
 from flask import Flask   # ← Import Flask
 
+app = Flask(__name__)
+
+@app.route('/ping')
+def ping():
+    return 'pong', 200
+
+# ... code Telegram webhook của bạn ...
 load_dotenv()
 
 # ================== FLASK FAKE SERVER (cho Render) ==================
