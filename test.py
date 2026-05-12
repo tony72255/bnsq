@@ -1,6 +1,5 @@
 import os
 import requests
-import threading
 from dotenv import load_dotenv
 import telebot
 from telebot import types
@@ -8,7 +7,7 @@ from flask import Flask, request
 
 load_dotenv()
 
-# ================== FLASK APP (chỉ 1 app duy nhất) ==================
+# ================== FLASK APP ==================
 app = Flask(__name__)
 
 @app.route('/ping')
@@ -19,79 +18,39 @@ def ping():
 def home():
     return "Chuyên Gia Crypto Bot đang chạy 24/7 📊"
 
-# ================== WEBHOOK CHO TELEGRAM ==================
+# ================== WEBHOOK TELEGRAM ==================
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    if request.headers.get('content-type') == 'application/json':
+    print("📥 Nhận request từ Telegram!")  # ← log để debug
+    try:
         json_string = request.get_data().decode('utf-8')
         update = telebot.types.Update.de_json(json_string)
         bot.process_new_updates([update])
         return '', 200
-    return '', 400
+    except Exception as e:
+        print(f"❌ Lỗi xử lý webhook: {e}")
+        return '', 400
 
-# ================== CÁC BIẾN MÔI TRƯỜNG ==================
+# ================== BIẾN MÔI TRƯỜNG ==================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 BINANCE_SQUARE_KEY = os.getenv("BINANCE_SQUARE_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# URL webhook của Render (bạn thay bằng link thật của app)
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # Ví dụ: https://ten-bot-cua-ban.onrender.com/webhook
+# URL webhook trên Render (PHẢI CHÍNH XÁC)
+WEBHOOK_URL = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME', 'bnsq.onrender.com')}/webhook"
 
-bot = telebot.TeleBot(TELEGRAM_TOKEN)
+bot = telebot.TeleBot(TELEGRAM_TOKEN, threaded=False)  # ← Quan trọng!
 pending_contents = {}
 
-# ================== GEMINI - CHUYÊN GIA CRYPTO ==================
-def generate_villain_content(prompt):
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={GEMINI_API_KEY}"
-        headers = {"Content-Type": "application/json"}
-        data = {
-            "contents": [{
-                "parts": [{
-                    "text": f"""Bạn là Chuyên Gia Phân Tích Crypto nghiêm túc. 
-Viết bài SIÊU NGẮN (45-55 từ), phân tích rõ ràng. 
-Kết thúc bằng lời khuyên cụ thể: NÊN MUA / NÊN BÁN / NÊN HOLD. 
-Khi nhắc coin thì tự động thêm $TICKER, tối đa 2-3 tag. 
-Giọng điệu chuyên nghiệp, ít emoji.
-Ý tưởng: {prompt}"""
-                }]
-            }],
-            "generationConfig": {
-                "temperature": 0.7,
-                "maxOutputTokens": 600
-            }
-        }
-        response = requests.post(url, headers=headers, json=data, timeout=15)
-        if response.status_code == 200:
-            return response.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-        return f"Lỗi Gemini: {response.text[:300]}"
-    except Exception as e:
-        return f"Lỗi kết nối Gemini: {str(e)}"
+# ================== (giữ nguyên các hàm generate_villain_content, post_to_binance_square, handlers...) ==================
+# (copy nguyên phần này từ code cũ của bạn, mình không thay đổi logic)
 
-# ================== ĐĂNG BINANCE SQUARE ==================
-def post_to_binance_square(content):
-    try:
-        url = "https://www.binance.com/bapi/composite/v1/public/pgc/openApi/content/add"
-        headers = {
-            "X-Square-OpenAPI-Key": BINANCE_SQUARE_KEY,
-            "Content-Type": "application/json",
-            "clienttype": "binanceSkill"
-        }
-        payload = {
-            "bodyTextOnly": content,
-            "contentType": 1,
-            "title": "",
-            "tags": ["crypto", "analysis", "expert"]
-        }
-        response = requests.post(url, headers=headers, json=payload, timeout=10)
-        if response.status_code == 200:
-            post_id = response.json().get('data', {}).get('id', 'unknown')
-            return f"✅ ĐĂNG THÀNH CÔNG!\nPost ID: {post_id}\n🔗 https://www.binance.com/en/square/post/{post_id}"
-        return f"❌ Lỗi Square: {response.status_code}"
-    except Exception as e:
-        return f"❌ Lỗi Square: {str(e)}"
+def generate_villain_content(prompt):  # ... (giữ nguyên)
+    # ... code cũ của bạn ...
 
-# ================== XỬ LÝ BOT ==================
+def post_to_binance_square(content):  # ... (giữ nguyên)
+    # ... code cũ của bạn ...
+
 @bot.message_handler(commands=['start'])
 def start(message):
     bot.reply_to(message, "📊 **Chuyên Gia Crypto Bot 4.0** đang chạy 24/7!\nGửi ý tưởng coin để tao phân tích.")
@@ -139,18 +98,21 @@ def callback_handler(call):
         bot.edit_message_text("❌ Đã hủy.", call.message.chat.id, call.message.message_id)
         pending_contents.pop(call.message.message_id, None)
 
-# ================== CHẠY BOT + FLASK ==================
+# ================== KHỞI ĐỘNG BOT ==================
 if __name__ == "__main__":
     print("🚀 Bot đang khởi động trên Render (Webhook mode)...")
     
-    # Xóa webhook cũ và set webhook mới
+    # Xóa webhook cũ và set lại
     bot.delete_webhook()
     bot.remove_webhook()
+    
     success = bot.set_webhook(url=WEBHOOK_URL, max_connections=100)
     if success:
         print(f"✅ Webhook đã set thành công: {WEBHOOK_URL}")
+        print("🔍 Webhook info:", bot.get_webhook_info())
     else:
-        print("❌ Không set được webhook! Kiểm tra WEBHOOK_URL trong .env")
+        print("❌ Không set được webhook! Kiểm tra token và URL")
 
-    # Chạy Flask server
-    app.run(host='0.0.0.0', port=10000)
+    # Chạy Flask
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
