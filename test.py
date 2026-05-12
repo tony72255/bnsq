@@ -1,5 +1,7 @@
 import os
 import requests
+import threading
+import time
 from dotenv import load_dotenv
 import telebot
 from telebot import types
@@ -18,17 +20,24 @@ def ping():
 def home():
     return "Chuyên Gia Crypto Bot đang chạy 24/7 📊"
 
-# ================== WEBHOOK TELEGRAM ==================
+# ================== WEBHOOK TELEGRAM (FIX SPAM) ==================
 @app.route('/webhook', methods=['POST'])
 def webhook():
     print("📥 Nhận request từ Telegram!")
     try:
         json_string = request.get_data().decode('utf-8')
         update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
+        
+        # Xử lý trong thread riêng → trả response 200 NGAY
+        threading.Thread(
+            target=bot.process_new_updates,
+            args=([update],),
+            daemon=True
+        ).start()
+        
         return '', 200
     except Exception as e:
-        print(f"❌ Lỗi xử lý webhook: {e}")
+        print(f"❌ Lỗi webhook: {e}")
         return '', 400
 
 # ================== BIẾN MÔI TRƯỜNG ==================
@@ -36,7 +45,6 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 BINANCE_SQUARE_KEY = os.getenv("BINANCE_SQUARE_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# URL webhook tự động lấy từ Render (không cần chỉnh tay)
 WEBHOOK_URL = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME', 'bnsq.onrender.com')}/webhook"
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN, threaded=False)
@@ -63,14 +71,14 @@ Giọng điệu chuyên nghiệp, ít emoji.
                 "maxOutputTokens": 600
             }
         }
-        response = requests.post(url, headers=headers, json=data, timeout=15)
+        response = requests.post(url, headers=headers, json=data, timeout=20)
         if response.status_code == 200:
             return response.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
         return f"Lỗi Gemini: {response.text[:300]}"
     except Exception as e:
         return f"Lỗi kết nối Gemini: {str(e)}"
 
-# ================== ĐĂNG BINANCE SQUARE ==================
+# ================== POST BINANCE SQUARE ==================
 def post_to_binance_square(content):
     try:
         url = "https://www.binance.com/bapi/composite/v1/public/pgc/openApi/content/add"
@@ -93,7 +101,7 @@ def post_to_binance_square(content):
     except Exception as e:
         return f"❌ Lỗi Square: {str(e)}"
 
-# ================== HANDLERS ==================
+# ================== BOT HANDLERS ==================
 @bot.message_handler(commands=['start'])
 def start(message):
     bot.reply_to(message, "📊 **Chuyên Gia Crypto Bot 4.0** đang chạy 24/7!\nGửi ý tưởng coin để tao phân tích.")
@@ -135,25 +143,43 @@ def callback_handler(call):
         content = pending_contents.get(call.message.message_id)
         if content:
             result = post_to_binance_square(content)
-            bot.edit_message_text(f"**ĐÃ ĐĂNG THÀNH CÔNG!** 📊\n\n{content}\n\n{result}", call.message.chat.id, call.message.message_id)
+            bot.edit_message_text(
+                f"**ĐÃ ĐĂNG THÀNH CÔNG!** 📊\n\n{content}\n\n{result}",
+                call.message.chat.id,
+                call.message.message_id
+            )
             pending_contents.pop(call.message.message_id, None)
     elif call.data == "post_no":
         bot.edit_message_text("❌ Đã hủy.", call.message.chat.id, call.message.message_id)
         pending_contents.pop(call.message.message_id, None)
 
+# ================== SELF KEEP-ALIVE (Không ngủ) ==================
+def keep_alive():
+    while True:
+        try:
+            hostname = os.getenv('RENDER_EXTERNAL_HOSTNAME', 'bnsq.onrender.com')
+            requests.get(f"https://{hostname}/ping", timeout=10)
+            print("🔄 Self-ping thành công - giữ bot không ngủ")
+        except Exception as e:
+            print(f"⚠️ Self-ping lỗi: {e}")
+        time.sleep(240)  # 4 phút
+
 # ================== KHỞI ĐỘNG ==================
 if __name__ == "__main__":
-    print("🚀 Bot đang khởi động trên Render (Webhook mode)...")
+    print("🚀 Bot đang khởi động trên Render (Webhook + Keep-alive)...")
     
+    # Set webhook
     bot.delete_webhook()
     bot.remove_webhook()
-    
     success = bot.set_webhook(url=WEBHOOK_URL, max_connections=100)
     if success:
         print(f"✅ Webhook đã set thành công: {WEBHOOK_URL}")
-        print("🔍 Webhook info:", bot.get_webhook_info())
     else:
         print("❌ Không set được webhook!")
 
+    # Bật self keep-alive
+    threading.Thread(target=keep_alive, daemon=True).start()
+
+    # Chạy Flask
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
