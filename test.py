@@ -14,7 +14,10 @@ import logging
 load_dotenv()
 
 # ================== LOGGING ==================
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # ================== FLASK ==================
@@ -26,7 +29,30 @@ def ping():
 
 @app.route('/')
 def home():
-    return "Chuyên Gia Crypto Bot 5.0 Fixed 🚀"
+    return "Chuyên Gia Crypto Bot 5.0 Fixed 🚀 Đang chạy 24/7"
+
+# ================== WEBHOOK ROUTE (RẤT QUAN TRỌNG) ==================
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    logger.info("📥 NHẬN WEBHOOK TỪ TELEGRAM!")
+    try:
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        
+        if update and update.message:
+            logger.info(f"📨 Tin nhắn từ user {update.message.from_user.id}: {update.message.text}")
+        
+        # Xử lý trong thread riêng
+        threading.Thread(
+            target=bot.process_new_updates,
+            args=([update],),
+            daemon=True
+        ).start()
+        
+        return '', 200
+    except Exception as e:
+        logger.error(f"❌ Lỗi webhook: {e}")
+        return '', 400
 
 # ================== CONFIG ==================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -123,7 +149,7 @@ def get_binance_data(symbol: str):
 # ================== BOT HANDLERS ==================
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.reply_to(message, "🚀 **Crypto Bot 5.0 Fixed** sẵn sàng!\nGửi coin hoặc ý tưởng.")
+    bot.reply_to(message, "🚀 **Crypto Bot 5.0 Fixed** sẵn sàng!\nGửi coin hoặc ý tưởng để phân tích.")
 
 @bot.message_handler(commands=['style'])
 def set_style(message):
@@ -151,7 +177,7 @@ def process_idea(message, prompt):
     if not prompt:
         return
     user_id = message.from_user.id
-    
+   
     if not check_rate_limit(user_id):
         bot.reply_to(message, "⏳ Đợi chút, bạn gửi nhanh quá (max 3 tin/phút).")
         return
@@ -204,7 +230,7 @@ def callback_handler(call):
         
         pending_contents.pop(key, None)
 
-# ================== POST BINANCE SQUARE ==================
+# ================== POST TO BINANCE SQUARE ==================
 def post_to_binance_square(content):
     try:
         url = "https://www.binance.com/bapi/composite/v1/public/pgc/openApi/content/add"
@@ -242,10 +268,27 @@ def keep_alive():
 # ================== START ==================
 if __name__ == "__main__":
     logger.info("🚀 Bot 5.0 Fixed đang khởi động...")
-    bot.delete_webhook()
-    success = bot.set_webhook(url=WEBHOOK_URL, max_connections=100, drop_pending_updates=True)
-    logger.info(f"Webhook set: {success}")
+
+    # Force reset webhook
+    bot.remove_webhook()
+    time.sleep(1.5)
     
+    success = bot.set_webhook(
+        url=WEBHOOK_URL,
+        max_connections=100,
+        drop_pending_updates=True
+    )
+    
+    logger.info(f"🔗 Webhook URL: {WEBHOOK_URL}")
+    logger.info(f"✅ Set webhook thành công: {success}")
+
+    # Kiểm tra webhook info
+    try:
+        info = bot.get_webhook_info()
+        logger.info(f"📊 Webhook status: {info.url if info else 'None'}")
+    except Exception as e:
+        logger.error(f"Không lấy được webhook info: {e}")
+
     threading.Thread(target=keep_alive, daemon=True).start()
     
     port = int(os.environ.get("PORT", 10000))
