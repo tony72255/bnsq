@@ -20,7 +20,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ================== FLASK ==================
+# ================== FLASK APP ==================
 app = Flask(__name__)
 
 @app.route('/ping')
@@ -29,9 +29,9 @@ def ping():
 
 @app.route('/')
 def home():
-    return "Chuyên Gia Crypto Bot 5.0 Fixed 🚀 Đang chạy 24/7"
+    return "Chuyên Gia Crypto Bot 5.1 🚀"
 
-# ================== WEBHOOK ROUTE (RẤT QUAN TRỌNG) ==================
+# ================== WEBHOOK ==================
 @app.route('/webhook', methods=['POST'])
 def webhook():
     logger.info("📥 NHẬN WEBHOOK TỪ TELEGRAM!")
@@ -40,15 +40,13 @@ def webhook():
         update = telebot.types.Update.de_json(json_string)
         
         if update and update.message:
-            logger.info(f"📨 Tin nhắn từ user {update.message.from_user.id}: {update.message.text}")
+            logger.info(f"📨 Từ user {update.message.from_user.id}: {update.message.text[:100]}")
         
-        # Xử lý trong thread riêng
         threading.Thread(
             target=bot.process_new_updates,
             args=([update],),
             daemon=True
         ).start()
-        
         return '', 200
     except Exception as e:
         logger.error(f"❌ Lỗi webhook: {e}")
@@ -146,20 +144,64 @@ def get_binance_data(symbol: str):
     except:
         return None
 
-# ================== BOT HANDLERS ==================
+# ================== MAIN MENU ==================
+def main_menu():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup.add("📊 Phân tích coin", "🎨 Đổi style")
+    markup.add("🧹 Xóa cuộc trò chuyện", "❓ Trợ giúp")
+    return markup
+
+# ================== COMMANDS ==================
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.reply_to(message, "🚀 **Crypto Bot 5.0 Fixed** sẵn sàng!\nGửi coin hoặc ý tưởng để phân tích.")
+    bot.reply_to(
+        message,
+        "🚀 **Chào mừng đến với Crypto Bot 5.1**\n\n"
+        "Tôi hỗ trợ:\n"
+        "• Phân tích coin & chart\n"
+        "• Đăng bài Binance Square\n"
+        "• Nhiều giọng điệu (lầy, pro...)\n\n"
+        "Dùng menu bên dưới hoặc gõ lệnh trực tiếp.",
+        reply_markup=main_menu()
+    )
+
+@bot.message_handler(commands=['help'])
+def help_command(message):
+    bot.reply_to(message, 
+        "📋 **Danh sách chức năng**\n\n"
+        "/start - Menu chính\n"
+        "/style pro|lầy|meme|trader - Đổi giọng\n"
+        "/clear - Xóa cuộc trò chuyện\n"
+        "/post [ý tưởng] - Phân tích nhanh\n\n"
+        "Bạn có thể gửi trực tiếp tên coin hoặc ý tưởng.",
+        reply_markup=main_menu()
+    )
+
+@bot.message_handler(commands=['clear'])
+def clear_chat(message):
+    bot.reply_to(message, "🧹 Đang dọn dẹp cuộc trò chuyện...")
+    deleted = 0
+    for i in range(1, 60):   # xóa tối đa 60 tin nhắn gần nhất
+        try:
+            bot.delete_message(message.chat.id, message.message_id - i)
+            deleted += 1
+        except:
+            continue
+    bot.send_message(
+        message.chat.id, 
+        f"✅ Đã dọn dẹp {deleted} tin nhắn!", 
+        reply_markup=main_menu()
+    )
 
 @bot.message_handler(commands=['style'])
 def set_style(message):
-    styles = ["pro", "lầy", "meme", "trader"]
     style = message.text.replace('/style', '').strip().lower()
-    if style in styles:
+    valid_styles = ["pro", "lầy", "meme", "trader"]
+    if style in valid_styles:
         user_styles[message.from_user.id] = style
-        bot.reply_to(message, f"✅ Style: **{style}**")
+        bot.reply_to(message, f"✅ Đã chuyển sang style **{style}**", reply_markup=main_menu())
     else:
-        bot.reply_to(message, "Style: pro, lầy, meme, trader")
+        bot.reply_to(message, "Style khả dụng: pro, lầy, meme, trader", reply_markup=main_menu())
 
 @bot.message_handler(commands=['post'])
 def post_cmd(message):
@@ -167,19 +209,35 @@ def post_cmd(message):
     if prompt:
         process_idea(message, prompt)
 
+# ================== XỬ LÝ TẤT CẢ TIN NHẮN ==================
 @bot.message_handler(func=lambda m: True)
-def handle_idea(message):
-    if message.text and message.text.startswith('/'):
+def handle_all(message):
+    text = (message.text or "").strip()
+    
+    if text == "📊 Phân tích coin":
+        bot.reply_to(message, "💡 Gửi tên coin hoặc ý tưởng bạn muốn phân tích:", reply_markup=main_menu())
         return
-    process_idea(message, message.text or "")
+    elif text == "🎨 Đổi style":
+        bot.reply_to(message, "Dùng lệnh:\n/style pro\n/style lầy\n/style meme\n/style trader", reply_markup=main_menu())
+        return
+    elif text == "🧹 Xóa cuộc trò chuyện":
+        clear_chat(message)
+        return
+    elif text == "❓ Trợ giúp":
+        help_command(message)
+        return
+
+    # Tin nhắn thường → phân tích
+    if text and not text.startswith('/'):
+        process_idea(message, text)
 
 def process_idea(message, prompt):
     if not prompt:
         return
+    
     user_id = message.from_user.id
-   
     if not check_rate_limit(user_id):
-        bot.reply_to(message, "⏳ Đợi chút, bạn gửi nhanh quá (max 3 tin/phút).")
+        bot.reply_to(message, "⏳ Đợi chút, bạn gửi nhanh quá (tối đa 3 tin/phút).")
         return
 
     bot.reply_to(message, "📡 Đang phân tích...")
@@ -200,7 +258,7 @@ def process_idea(message, prompt):
 
     sent_msg = bot.send_message(
         message.chat.id,
-        f"**Phân tích {prompt.upper()}**\n\n{content}\n\n**Đăng lên Binance Square?**",
+        f"**Phân tích {prompt.upper()}**\n\n{content}\n\n**Đăng lên Binance Square không?**",
         reply_markup=markup,
         parse_mode='Markdown'
     )
@@ -215,7 +273,7 @@ def callback_handler(call):
         key = (call.message.chat.id, call.message.message_id)
         content = pending_contents.get(key)
         if not content:
-            bot.answer_callback_query(call.id, "Nội dung hết hạn!")
+            bot.answer_callback_query(call.id, "Nội dung đã hết hạn!")
             return
 
         if call.data == "post_yes":
@@ -260,16 +318,14 @@ def keep_alive():
         try:
             hostname = os.getenv('RENDER_EXTERNAL_HOSTNAME', 'bnsq.onrender.com')
             requests.get(f"https://{hostname}/ping", timeout=10)
-            logger.info("Self-ping OK")
         except:
             pass
         time.sleep(240)
 
-# ================== START ==================
+# ================== KHỞI ĐỘNG ==================
 if __name__ == "__main__":
-    logger.info("🚀 Bot 5.0 Fixed đang khởi động...")
+    logger.info("🚀 Bot 5.1 đang khởi động...")
 
-    # Force reset webhook
     bot.remove_webhook()
     time.sleep(1.5)
     
@@ -278,16 +334,7 @@ if __name__ == "__main__":
         max_connections=100,
         drop_pending_updates=True
     )
-    
-    logger.info(f"🔗 Webhook URL: {WEBHOOK_URL}")
-    logger.info(f"✅ Set webhook thành công: {success}")
-
-    # Kiểm tra webhook info
-    try:
-        info = bot.get_webhook_info()
-        logger.info(f"📊 Webhook status: {info.url if info else 'None'}")
-    except Exception as e:
-        logger.error(f"Không lấy được webhook info: {e}")
+    logger.info(f"✅ Webhook set: {success}")
 
     threading.Thread(target=keep_alive, daemon=True).start()
     
