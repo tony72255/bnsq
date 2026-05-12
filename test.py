@@ -4,31 +4,38 @@ import threading
 from dotenv import load_dotenv
 import telebot
 from telebot import types
-from flask import Flask   # ← Import Flask
+from flask import Flask, request
 
+load_dotenv()
+
+# ================== FLASK APP (chỉ 1 app duy nhất) ==================
 app = Flask(__name__)
 
 @app.route('/ping')
 def ping():
-    return 'pong', 2000
-
-# ... code Telegram webhook của bạn ...
-load_dotenv()
-
-# ================== FLASK FAKE SERVER (cho Render) ==================
-app = Flask(__name__)
+    return 'pong', 200
 
 @app.route('/')
 def home():
     return "Chuyên Gia Crypto Bot đang chạy 24/7 📊"
 
-def run_flask():
-    app.run(host='0.0.0.0', port=10000)
+# ================== WEBHOOK CHO TELEGRAM ==================
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return '', 200
+    return '', 400
 
 # ================== CÁC BIẾN MÔI TRƯỜNG ==================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 BINANCE_SQUARE_KEY = os.getenv("BINANCE_SQUARE_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# URL webhook của Render (bạn thay bằng link thật của app)
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # Ví dụ: https://ten-bot-cua-ban.onrender.com/webhook
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 pending_contents = {}
@@ -132,8 +139,18 @@ def callback_handler(call):
         bot.edit_message_text("❌ Đã hủy.", call.message.chat.id, call.message.message_id)
         pending_contents.pop(call.message.message_id, None)
 
-# ================== CHẠY CẢ BOT + FAKE SERVER ==================
+# ================== CHẠY BOT + FLASK ==================
 if __name__ == "__main__":
-    print("🚀 Bot + Fake Server đang chạy trên Render...")
-    threading.Thread(target=run_flask, daemon=True).start()
-    bot.infinity_polling()
+    print("🚀 Bot đang khởi động trên Render (Webhook mode)...")
+    
+    # Xóa webhook cũ và set webhook mới
+    bot.delete_webhook()
+    bot.remove_webhook()
+    success = bot.set_webhook(url=WEBHOOK_URL, max_connections=100)
+    if success:
+        print(f"✅ Webhook đã set thành công: {WEBHOOK_URL}")
+    else:
+        print("❌ Không set được webhook! Kiểm tra WEBHOOK_URL trong .env")
+
+    # Chạy Flask server
+    app.run(host='0.0.0.0', port=10000)
