@@ -1,4 +1,5 @@
-pyTelegramBotAPI
+groq
 python-dotenv
+pyTelegramBotAPI
+Flask
 requests
-flask
