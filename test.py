@@ -26,7 +26,7 @@ def ping():
 
 @app.route('/')
 def home():
-    return "Chuyên Gia Crypto Bot 5.0 🚀 Đang chạy 24/7"
+    return "Chuyên Gia Crypto Bot 5.0 Fixed 🚀"
 
 # ================== CONFIG ==================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -38,8 +38,8 @@ WEBHOOK_URL = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME', 'bnsq.onrender.co
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN, threaded=False)
 
-pending_contents = {}           # (chat_id, msg_id) -> content
-user_styles = {}                # user_id -> style
+pending_contents = {}
+user_styles = {}
 user_last_request = defaultdict(list)
 pending_lock = Lock()
 
@@ -55,7 +55,15 @@ def check_rate_limit(user_id):
     user_last_request[user_id].append(now)
     return True
 
-# ================== MULTI-MODEL + POST PROCESSING ==================
+# ================== POST PROCESS ==================
+def post_process(text: str) -> str:
+    text = text.replace("Khuyến nghị:", "\n\nKhuyến nghị:")
+    emojis = ["📈", "📉", "⚡", "🔥", "🧿", "💎"]
+    if random.random() > 0.6:
+        text += f" {random.choice(emojis)}"
+    return text.strip()
+
+# ================== GENERATE ANALYSIS ==================
 def generate_crypto_analysis(prompt: str, user_id: int) -> str:
     style = user_styles.get(user_id, "trader")
     
@@ -65,22 +73,23 @@ Dùng ngôn ngữ đời thường, thêm cảm xúc cá nhân nhẹ.
 Kết thúc bằng "Khuyến nghị: NÊN MUA / NÊN BÁN / NÊN HOLD"
 Thêm $TICKER."""
 
-    # Thử Groq trước (nhanh + tự nhiên)
+    # Thử Groq trước
     if GROQ_API_KEY:
         try:
             from groq import Groq
             client = Groq(api_key=GROQ_API_KEY)
             resp = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
-                messages=[{"role": "system", "content": system_prompt},
-                          {"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
                 temperature=0.85,
                 max_tokens=400
             )
-            text = resp.choices[0].message.content.strip()
-            return post_process(text)
-        except:
-            pass
+            return post_process(resp.choices[0].message.content.strip())
+        except Exception as e:
+            logger.warning(f"Groq failed: {e}")
 
     # Fallback Gemini
     try:
@@ -89,21 +98,15 @@ Thêm $TICKER."""
             "contents": [{"parts": [{"text": f"{system_prompt}\n\n{prompt}"}]}],
             "generationConfig": {"temperature": 0.85, "maxOutputTokens": 400}
         }
-        resp = requests.post(url, json=data, timeout=20)
-        text = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-        return post_process(text)
+        resp = requests.post(url, json=data, timeout=25)
+        if resp.status_code == 200:
+            text = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+            return post_process(text)
+        else:
+            return f"Lỗi Gemini: {resp.status_code}"
     except Exception as e:
-        logger.error(f"Generate error: {e}")
+        logger.error(f"Gemini error: {e}")
         return "Lỗi phân tích. Thử lại sau nhé!"
-
-def post_process(text: str) -> str:
-    """Làm cho nội dung tự nhiên hơn"""
-    text = text.replace("Khuyến nghị:", "\n\nKhuyến nghị:")
-    # Thêm emoji ngẫu nhiên nhẹ
-    emojis = ["📈", "📉", "⚡", "🔥", "🧿"]
-    if random.random() > 0.6:
-        text += f" {random.choice(emojis)}"
-    return text.strip()
 
 # ================== BINANCE DATA ==================
 def get_binance_data(symbol: str):
@@ -113,17 +116,14 @@ def get_binance_data(symbol: str):
         return {
             "price": float(data['lastPrice']),
             "change": float(data['priceChangePercent']),
-            "volume": float(data['volume']),
-            "high": float(data['highPrice']),
-            "low": float(data['lowPrice'])
         }
     except:
         return None
 
-# ================== BOT COMMANDS ==================
+# ================== BOT HANDLERS ==================
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.reply_to(message, "🚀 **Crypto Bot 5.0** sẵn sàng!\nGửi coin hoặc ý tưởng để phân tích.\n/style để đổi giọng điệu.")
+    bot.reply_to(message, "🚀 **Crypto Bot 5.0 Fixed** sẵn sàng!\nGửi coin hoặc ý tưởng.")
 
 @bot.message_handler(commands=['style'])
 def set_style(message):
@@ -131,9 +131,9 @@ def set_style(message):
     style = message.text.replace('/style', '').strip().lower()
     if style in styles:
         user_styles[message.from_user.id] = style
-        bot.reply_to(message, f"✅ Đã chuyển sang style **{style}**")
+        bot.reply_to(message, f"✅ Style: **{style}**")
     else:
-        bot.reply_to(message, f"Style có sẵn: pro, lầy, meme, trader\nVí dụ: /style lầy")
+        bot.reply_to(message, "Style: pro, lầy, meme, trader")
 
 @bot.message_handler(commands=['post'])
 def post_cmd(message):
@@ -143,28 +143,29 @@ def post_cmd(message):
 
 @bot.message_handler(func=lambda m: True)
 def handle_idea(message):
-    if message.text.startswith('/'): 
+    if message.text and message.text.startswith('/'):
         return
-    process_idea(message, message.text)
+    process_idea(message, message.text or "")
 
 def process_idea(message, prompt):
+    if not prompt:
+        return
     user_id = message.from_user.id
     
     if not check_rate_limit(user_id):
-        bot.reply_to(message, "⏳ Đợi chút, bạn gửi nhanh quá (tối đa 3 tin/phút).")
+        bot.reply_to(message, "⏳ Đợi chút, bạn gửi nhanh quá (max 3 tin/phút).")
         return
 
-    bot.reply_to(message, "📡 Đang lấy dữ liệu thị trường + phân tích...")
+    bot.reply_to(message, "📡 Đang phân tích...")
 
-    # Lấy dữ liệu Binance nếu là coin
     market_data = ""
     if len(prompt.split()) == 1 and prompt.upper().isalpha():
         data = get_binance_data(prompt)
         if data:
-            market_data = f"\nGiá hiện tại: ${data['price']:,.2f} | Change 24h: {data['change']:+.2f}%"
+            market_data = f"\nGiá: ${data['price']:,.4f} | 24h: {data['change']:+.2f}%"
 
     content = generate_crypto_analysis(prompt + market_data, user_id)
-    
+
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
         types.InlineKeyboardButton("✅ ĐĂNG NGAY", callback_data="post_yes"),
@@ -203,7 +204,7 @@ def callback_handler(call):
         
         pending_contents.pop(key, None)
 
-# ================== POST TO BINANCE SQUARE ==================
+# ================== POST BINANCE SQUARE ==================
 def post_to_binance_square(content):
     try:
         url = "https://www.binance.com/bapi/composite/v1/public/pgc/openApi/content/add"
@@ -224,7 +225,8 @@ def post_to_binance_square(content):
             return f"Post ID: {post_id}\n🔗 https://www.binance.com/en/square/post/{post_id}"
         return f"Lỗi Square: {r.status_code}"
     except Exception as e:
-        return f"Lỗi: {str(e)}"
+        logger.error(f"Square error: {e}")
+        return "Lỗi khi đăng Square"
 
 # ================== KEEP ALIVE ==================
 def keep_alive():
@@ -232,15 +234,17 @@ def keep_alive():
         try:
             hostname = os.getenv('RENDER_EXTERNAL_HOSTNAME', 'bnsq.onrender.com')
             requests.get(f"https://{hostname}/ping", timeout=10)
+            logger.info("Self-ping OK")
         except:
             pass
         time.sleep(240)
 
 # ================== START ==================
 if __name__ == "__main__":
-    logger.info("🚀 Bot 5.0 khởi động...")
+    logger.info("🚀 Bot 5.0 Fixed đang khởi động...")
     bot.delete_webhook()
-    bot.set_webhook(url=WEBHOOK_URL, max_connections=100, drop_pending_updates=True)
+    success = bot.set_webhook(url=WEBHOOK_URL, max_connections=100, drop_pending_updates=True)
+    logger.info(f"Webhook set: {success}")
     
     threading.Thread(target=keep_alive, daemon=True).start()
     
